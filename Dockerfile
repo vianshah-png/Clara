@@ -37,5 +37,5 @@ ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
 EXPOSE 8080
 
-# RUN BOTH: Next.js (8080) handles the main port and proxies /api to backend (3001)
-CMD ["concurrently", "PORT=3001 node backend/server.js", "PORT=8080 HOSTNAME=0.0.0.0 node frontend/server.js"]
+# RUN BOTH: Next.js handles the main port ($PORT) and proxies /api to backend (3001)
+CMD ["concurrently", "PORT=3001 node backend/server.js", "PORT=${PORT:-8080} HOSTNAME=0.0.0.0 node frontend/server.js"]
