@@ -4,8 +4,15 @@
 //  TRANSFORMED TO JAVASCRIPT (ESM) | PRODUCTION OPTIMIZED
 // ============================================================
 
-import { google } from "@ai-sdk/google";
-import { generateText } from "ai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { generateText, generateObject } from "ai";
+import { z } from "zod";
+
+const google = createGoogleGenerativeAI({
+  apiKey: process.env.GEMINI_API_KEY || "",
+});
+
+const MODEL_NAME = "gemini-2.5-flash";
 
 // ---- Microservice Configuration ----
 export const serviceConfig = {
@@ -127,11 +134,11 @@ export async function fetchShopProducts() {
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(10000)
     });
-    
+
     if (!res.ok) throw new Error(`Shop API returned ${res.status}`);
     const json = await res.json();
     const data = Array.isArray(json) ? json[0] : json;
-    
+
     // Normalize products properly based on actual BN API structure
     if (data && data.status === "success" && data.data && Array.isArray(data.data.products)) {
       shopStore = data.data.products.map(p => ({
@@ -184,9 +191,9 @@ export async function findShopAlternatives(basketItems) {
       // Word intersection matching
       const hasWordMatch = itemWords.some(word => pWords.includes(word));
       if (hasWordMatch) return true;
-      
+
       // Specifically catch common staples that BN sells
-      const isStapleMatch = 
+      const isStapleMatch =
         (itemNameLower.includes('barley') && pNameLower.includes('barley')) ||
         (itemNameLower.includes('oats') && pNameLower.includes('oats')) ||
         (itemNameLower.includes('makhana') && pNameLower.includes('makhana')) ||
@@ -233,7 +240,7 @@ export async function findShopAlternatives(basketItems) {
 function preFilterRecipes(recipes, profile) {
   const isVeg = profile.dietType?.toLowerCase().includes("veg") && !profile.dietType?.toLowerCase().includes("non");
   const isJain = profile.dietType?.toLowerCase().includes("jain");
-  
+
   const allergyArr = (profile.allergies && profile.allergies !== "None")
     ? profile.allergies.toLowerCase().split(",").map(a => a.trim()).filter(a => a.length > 0)
     : [];
@@ -245,7 +252,7 @@ function preFilterRecipes(recipes, profile) {
   const filtered = recipes.filter(r => {
     // 1. Data Integrity: Must have macros
     if (!r.calories || r.calories === 0) return false;
-    
+
     // 2. Diet Type
     if (isVeg && r.recipe_type?.toLowerCase().includes("non-veg")) return false;
     if (isJain) {
@@ -257,7 +264,7 @@ function preFilterRecipes(recipes, profile) {
     const titleLower = r.title?.toLowerCase() || "";
     if (allergyArr.some(a => titleLower.includes(a))) return false;
     if (aversionArr.some(a => titleLower.includes(a))) return false;
-    
+
     return true;
   });
 
@@ -272,10 +279,10 @@ function getTieredRecipeSelection(recipes, profile) {
   const start = Date.now();
   const targetCalories = calculateDailyCalories(profile);
   const cuisinePref = (profile.cuisine || "Indian").toLowerCase();
-  
+
   // 1. Base Filter (Hard Rules)
   const baseValid = preFilterRecipes(recipes, profile);
-  
+
   // 2. Calorie Relevance Filter
   // Limit to recipes between 30 and 800 calories to avoid irrelevant condiments/oversized meals
   const relevant = baseValid.filter(r => r.calories >= 30 && r.calories <= 800);
@@ -291,7 +298,7 @@ function getTieredRecipeSelection(recipes, profile) {
   };
 
   // Prioritize preferred cuisine, then fill with variety
-  let selection = tier1.slice(0, 250); 
+  let selection = tier1.slice(0, 250);
   if (selection.length < 350) {
     selection = [...selection, ...selectFrom(other, 350 - selection.length)];
   }
@@ -306,12 +313,12 @@ function getTieredRecipeSelection(recipes, profile) {
  */
 function getCompactRecipeArchive(recipes, profile) {
   const start = Date.now();
-  
+
   // Use professional tiered selection instead of passing all recipes
   const selectedRecipes = getTieredRecipeSelection(recipes, profile);
 
   // Build ultra-compact archive: slug|name|cal|pro|carb|fat
-  const archiveStr = selectedRecipes.map(r => 
+  const archiveStr = selectedRecipes.map(r =>
     `${r.slug}|${r.title}|${r.calories}|${Math.round(r.protein)}|${Math.round(r.carbs)}|${Math.round(r.fat)}`
   ).join("\n");
 
@@ -354,7 +361,7 @@ export async function fetchUserProfile(userId) {
     return {
       age: details.age?.toString() || "30",
       weight: weightData.program_start_weight?.toString() || "70",
-      height: details.height?.toString() || "160", 
+      height: details.height?.toString() || "160",
       gender: details.gender || "Female",
       goal: client.program_details?.program_name || "Maintenance",
       dietType: details.eating_habit || "Vegetarian",
@@ -551,21 +558,44 @@ export async function* generateMealPlanStream(profile) {
 
   try {
     const aiStart = Date.now();
-    const { text, usage } = await generateText({
-      model: google("gemini-2.0-flash"),
-      system: "You are a clinical dietitian AI. Output ONLY a raw JSON array with exactly 3 day objects. No markdown, no commentary. Use provided slugs ONLY. Each meal slot must be an array of {slug} objects.",
-      prompt,
+    const schema = z.object({
+      days: z.array(z.object({
+        day: z.string(),
+        breakfast: z.array(z.object({ slug: z.string() })),
+        lunch: z.array(z.object({ slug: z.string() })),
+        snack: z.array(z.object({ slug: z.string() })),
+        dinner: z.array(z.object({ slug: z.string() })),
+        summary: z.string()
+      }))
+    });
+
+    const { object, usage } = await generateObject({
+      model: google(MODEL_NAME),
+      schema,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.0,
+      topP: 0.3,
+      topK: 1,
+      seed: 140,
+      providerOptions: {
+        google: {
+          thinkingConfig: {
+            includeThoughts: true,
+            thinkingBudget: 0,
+          },
+        }
+      }
     });
     const aiEnd = Date.now();
-    
+
     console.log(`[Diet Gen] AI response received in ${aiEnd - aiStart}ms`);
     console.log(`[Diet Gen] Tokens Consumed: Prompt=${usage.promptTokens}, Completion=${usage.completionTokens}, Total=${usage.totalTokens}`);
 
-    const { objects } = extractJSONObjects(text);
-    console.log(`[Diet Gen] Extracted ${objects.length} day objects from response`);
+    const days = object.days || [];
+    console.log(`[Diet Gen] Extracted ${days.length} day objects from response`);
 
-    if (objects.length > 0) {
-      for (const obj of objects) {
+    if (days.length > 0) {
+      for (const obj of days) {
         const slotStart = Date.now();
         const hydrated = {
           day: obj.day || "Next Day",
@@ -603,34 +633,29 @@ export async function getMealSwapOptions(currentRecipe, profile) {
 
   try {
     const aiStart = Date.now();
-    const { text } = await generateText({
-      model: google("gemini-2.0-flash"),
-      prompt,
-    });
-    console.log(`[Swap AI] Options generated in ${Date.now() - aiStart}ms`);
-
-    const { objects } = extractJSONObjects(text);
-    console.log(`[Swap AI] Extracted ${objects.length} items from response`);
-
-    // Flexible extraction: handle top-level arrays of strings/objects or objects with "slugs" key
-    let slugs = [];
-    if (objects.length > 0) {
-      if (typeof objects[0] === 'string') {
-        // AI returned ["slug1", "slug2"] which extractJSONObjects parsed into ["slug1", "slug2"]
-        slugs = objects.filter(item => typeof item === 'string');
-      } else if (Array.isArray(objects[0])) {
-        // AI returned [ ["slug1", "slug2"] ] - rare but possible
-        slugs = objects[0];
-      } else if (objects[0].slugs && Array.isArray(objects[0].slugs)) {
-        // AI returned { slugs: ["slug1", "slug2"] }
-        slugs = objects[0].slugs;
-      } else {
-        // AI returned [ {slug: "slug1"}, {slug: "slug2"} ]
-        slugs = objects.map(o => o.slug).filter(Boolean);
+    const { object } = await generateObject({
+      model: google(MODEL_NAME),
+      schema: z.object({ slugs: z.array(z.string()) }),
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.0,
+      topP: 0.3,
+      topK: 1,
+      seed: 140,
+      providerOptions: {
+        google: {
+          thinkingConfig: {
+            includeThoughts: true,
+            thinkingBudget: 0,
+          },
+        }
       }
-    }
+    });
 
-    return slugs.filter(s => typeof s === 'string').map(s => hydrateRecipe({ slug: s }));
+    console.log(`[Swap AI] Options generated in ${Date.now() - aiStart}ms`);
+    const finalSlugs = object.slugs || [];
+    console.log(`[Swap AI] Extracted ${finalSlugs.length} slugs from response`);
+
+    return finalSlugs.map(s => hydrateRecipe({ slug: s }));
   } catch (err) {
     console.error("[Swap Error]", err);
     return [];
@@ -644,7 +669,7 @@ export async function generateSpeechAudio(text) {
 
   try {
     const response = await genai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash-lite",
       contents: [{ role: "user", parts: [{ text: `Convert this tip to natural speech: ${text}` }] }],
       config: {
         responseModalities: ["AUDIO"],

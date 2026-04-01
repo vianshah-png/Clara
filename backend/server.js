@@ -62,12 +62,26 @@ app.post("/api/generate-plan", async (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
+
+    // SSE Comment-based keep-alive to prevent middleware/proxy timeouts
+    res.write(":\n\n");
+    
+    // Send initial status ping
+    res.write(`data: {"status": "starting"}\n\n`);
 
     const sStart = Date.now();
     let emitted = false;
     let dayCount = 0;
+    console.log(`[Stream] SSE Connection Opened. Beginning background generation...`);
+
     for await (const day of generateMealPlanStream(profile)) {
+      if (day.error) {
+        console.warn(`[Stream] AI returned error: ${day.error}`);
+        res.write(`data: ${JSON.stringify({ error: day.error })}\n\n`);
+        continue;
+      }
       res.write(`data: ${JSON.stringify(day)}\n\n`);
       emitted = true;
       dayCount++;
@@ -75,6 +89,7 @@ app.post("/api/generate-plan", async (req, res) => {
     }
 
     if (!emitted) {
+      console.warn(`[Stream] No days were emitted. Closing with error.`);
       res.write(`data: ${JSON.stringify({ error: "No recipes found matching current preferences." })}\n\n`);
     }
 

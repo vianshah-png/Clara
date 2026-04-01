@@ -5,7 +5,7 @@
 
 import { UserProfile, DailyPlan, Recipe } from "../types";
 
-const API_BASE_URL = "/api";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 /**
  * Stream a 3-day meal plan from the backend via SSE.
@@ -40,7 +40,9 @@ export async function generateMealPlanStream(
     const { done, value } = await reader.read();
     if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
+    const chunk = decoder.decode(value, { stream: true });
+    console.debug("[SSE] Raw Chunk Received:", chunk.substring(0, 100).replace(/\n/g, '\\n'));
+    buffer += chunk;
 
     // SSE events are separated by double newlines
     // Process complete events from the buffer
@@ -68,16 +70,22 @@ export async function generateMealPlanStream(
       if (!dataStr) continue;
 
       try {
-        const dayPlan = JSON.parse(dataStr);
-        if (dayPlan.error) {
-          console.error("[SSE] Server error:", dayPlan.error);
-          throw new Error(dayPlan.error);
+        const payload = JSON.parse(dataStr);
+        if (payload.status) {
+          console.debug("[SSE] Status update received:", payload.status);
+          continue;
         }
-        onDayGenerated(dayPlan);
+        if (payload.error) {
+          console.error("[SSE] Server error payload received:", payload.error);
+          throw new Error(payload.error);
+        }
+        if (payload.day) {
+          onDayGenerated(payload);
+        }
       } catch (e: any) {
-        // Only log parse errors, don't throw — allows stream to continue
+        // Only warn for real parsing issues, ignore the specific SSE termination/errors we already handled
         if (e.message && !e.message.includes("No recipes found")) {
-          console.warn("[SSE] Parse warning for chunk:", dataStr.substring(0, 100), e.message);
+          console.warn("[SSE] Parse error or missing day property:", e.message, "Content:", dataStr.substring(0, 50));
         }
       }
     }
