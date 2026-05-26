@@ -13,7 +13,8 @@ import {
   fetchRecipes,
   serviceConfig,
   findShopAlternatives,
-} from "./geminiService.js";
+  getQuickFillers,
+} from "./src/services/geminiService.js";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3001", 10);
@@ -178,7 +179,18 @@ app.post("/api/shop-alternatives", async (req, res) => {
   }
 });
 
-// ---- Route 5 (Removed Scraper) ----
+// ---- Route 5: Quick Fillers ----
+app.post("/api/quick-fillers", async (req, res) => {
+  const { userProfile, limit } = req.body || {};
+
+  try {
+    const fillers = await getQuickFillers(userProfile || {}, Number(limit) || 8);
+    res.json({ success: true, count: fillers.length, data: fillers });
+  } catch (err) {
+    console.error("[Quick Fillers Error]", err);
+    res.status(500).json({ error: "Failed to fetch quick fillers" });
+  }
+});
 
 // ---- Launch ----
 app.listen(PORT, () => {

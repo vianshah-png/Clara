@@ -39,6 +39,13 @@ const ETHNICITY_OPTIONS = [
   "Other"
 ];
 
+const FOOD_RECALL_OPTIONS = {
+  breakfast: ["Poha", "Upma", "Oats", "Eggs", "Toast", "Smoothie", "Paratha", "Idli", "Dosa"],
+  lunch: ["Roti", "Rice", "Dal", "Sabzi", "Salad", "Chicken", "Fish", "Paneer", "Curd"],
+  snack: ["Fruits", "Nuts", "Makhana", "Tea/Coffee", "Biscuit", "Chana", "Sprouts"],
+  dinner: ["Soup", "Salad", "Light Khichdi", "Roti", "Sabzi", "Chicken", "Dal", "Wrap"]
+};
+
 export const OnboardingForm: React.FC<OnboardingFormProps> = ({ onSubmit, isLoading }) => {
   const [formData, setFormData] = useState<UserProfile>({
     age: '30',
@@ -50,7 +57,13 @@ export const OnboardingForm: React.FC<OnboardingFormProps> = ({ onSubmit, isLoad
     activityLevel: 'Moderately Active',
     ethnicity: '',
     cuisine: '',
-    allergies: ''
+    allergies: '',
+    foodRecall: {
+      breakfast: [],
+      lunch: [],
+      snack: [],
+      dinner: []
+    }
   });
 
   const handleChange = (field: keyof UserProfile) => (
@@ -61,7 +74,7 @@ export const OnboardingForm: React.FC<OnboardingFormProps> = ({ onSubmit, isLoad
 
   const handleBubbleToggle = (field: 'cuisine' | 'allergies', value: string) => {
     setFormData(prev => {
-      const currentString = prev[field];
+      const currentString = prev[field] as string;
       const currentArray = currentString ? currentString.split(', ') : [];
       
       let newArray;
@@ -72,6 +85,25 @@ export const OnboardingForm: React.FC<OnboardingFormProps> = ({ onSubmit, isLoad
       }
       
       return { ...prev, [field]: newArray.join(', ') };
+    });
+  };
+
+  const handleFoodRecallToggle = (meal: 'breakfast' | 'lunch' | 'snack' | 'dinner', value: string) => {
+    setFormData(prev => {
+      const currentArray = prev.foodRecall?.[meal] || [];
+      let newArray;
+      if (currentArray.includes(value)) {
+        newArray = currentArray.filter(item => item !== value);
+      } else {
+        newArray = [...currentArray, value];
+      }
+      return {
+        ...prev,
+        foodRecall: {
+          ...prev.foodRecall!,
+          [meal]: newArray
+        }
+      };
     });
   };
 
@@ -208,7 +240,6 @@ export const OnboardingForm: React.FC<OnboardingFormProps> = ({ onSubmit, isLoad
                 </div>
              </div>
 
-
              {/* Allergy Bubbles */}
              <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 mb-3">
@@ -235,6 +266,44 @@ export const OnboardingForm: React.FC<OnboardingFormProps> = ({ onSubmit, isLoad
                   })}
                 </div>
              </div>
+          </div>
+        </div>
+
+        {/* Section 4: Food Recall */}
+        <div className="p-8 sm:p-10 bg-white">
+          <div className="flex items-center gap-4 mb-10">
+            <div className="w-10 h-10 rounded-full bg-[#00B5CD] text-white flex items-center justify-center font-bold text-lg shadow-lg shadow-brand-100"></div>
+            <h3 className="text-3xl font-serif font-black text-slate-800 tracking-tight">Food Recall (Ideal Meals)</h3>
+          </div>
+          <p className="text-sm text-slate-500 mb-6">What do you ideally like to eat? Select the items you prefer for each meal.</p>
+
+          <div className="space-y-6">
+            {(['breakfast', 'lunch', 'snack', 'dinner'] as const).map(mealType => (
+              <div key={mealType} className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                <label className="block text-[12px] font-black text-slate-700 uppercase tracking-widest mb-4">
+                  {mealType}
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {FOOD_RECALL_OPTIONS[mealType].map(opt => {
+                    const isSelected = formData.foodRecall?.[mealType]?.includes(opt);
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => handleFoodRecallToggle(mealType, opt)}
+                        className={`px-4 py-2 rounded-full text-xs font-bold transition-all border ${
+                          isSelected 
+                            ? 'bg-[#00B5CD] border-[#00B5CD] text-white shadow-md transform scale-105' 
+                            : 'bg-white border-slate-200 text-slate-500 hover:border-[#00B5CD] hover:text-[#00B5CD]'
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -266,3 +335,4 @@ export const OnboardingForm: React.FC<OnboardingFormProps> = ({ onSubmit, isLoad
     </div>
   );
 };
+

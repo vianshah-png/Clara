@@ -190,9 +190,17 @@ export const CookingModeOverlay: React.FC<CookingModeOverlayProps> = ({ recipe, 
           </button>
           <div>
             <h1 className="text-xl font-serif font-bold text-slate-800">{recipe.name}</h1>
-            <p className="text-sm text-brand-600 font-semibold flex items-center gap-2">
-              {showPrep ? 'Preparation View' : `Step ${currentStepIdx + 1} of ${steps.length || 0}`}
-            </p>
+            <div className="flex items-center gap-3 mt-0.5">
+              <p className="text-sm text-brand-600 font-semibold">
+                {showPrep ? 'Preparation View' : `Step ${currentStepIdx + 1} of ${steps.length || 0}`}
+              </p>
+              {recipe.servingSize && recipe.servingSize !== 'Standard Serving' && (
+                <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 text-xs font-bold px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" /></svg>
+                  {recipe.servingSize}
+                </span>
+              )}
+            </div>
           </div>
         </div>
         

@@ -152,6 +152,16 @@ export interface ShopAlternative {
   price?: number;
 }
 
+export interface QuickFiller {
+  id: string | number;
+  name: string;
+  category: string;
+  shopUrl: string;
+  image?: string;
+  price?: number;
+  description?: string;
+}
+
 /**
  * Get healthy alternatives for shopping basket items from BN Shop
  */
@@ -164,6 +174,24 @@ export async function getShopAlternatives(basketItems: string[]): Promise<ShopAl
 
   if (!res.ok) throw new Error("Failed to get shop alternatives");
   return res.json();
+}
+
+/**
+ * Get snack-friendly BN Shop products filtered for user allergies and aversions.
+ */
+export async function getQuickFillers(
+  userProfile: UserProfile,
+  limit = 8
+): Promise<QuickFiller[]> {
+  const res = await fetch(`${API_BASE_URL}/quick-fillers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userProfile, limit }),
+  });
+
+  if (!res.ok) throw new Error("Failed to fetch quick fillers");
+  const json = await res.json();
+  return json.data || [];
 }
 
 // ----------------------------------------------------

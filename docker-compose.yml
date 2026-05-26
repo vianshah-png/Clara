@@ -1,0 +1,81 @@
+# ============================================================
+#  Clara AI — Docker Compose (Local Development)
+#  Run: docker compose up --build
+# ============================================================
+#
+#  Qdrant is NOT included here — it reuses the Qdrant instance
+#  from BN-2.0-API (already running on port 6333).
+#  If you need a standalone Qdrant, uncomment the qdrant service below.
+# ============================================================
+
+services:
+  # ---- Backend (Express API) ----
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: clara-backend
+    ports:
+      - "3004:3004"
+    env_file:
+      - ./backend/.env
+    environment:
+      - PORT=3004
+      - QDRANT_URL=http://qdrant:6333
+      - FRONTEND_URL=http://localhost:3003
+    volumes:
+      # Mount host source code so node --watch picks up live edits
+      - ./backend:/app
+      # Keep the container's node_modules intact (don't overwrite with host)
+      - /app/node_modules
+    networks:
+      - clara-net
+      - bn-shared
+    restart: unless-stopped
+
+  # ---- Frontend (Next.js) ----
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: clara-frontend
+    ports:
+      - "3003:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3003/api
+      - BACKEND_INTERNAL_URL=http://backend:3004
+    depends_on:
+      - backend
+    networks:
+      - clara-net
+    restart: unless-stopped
+
+  # ---- STANDALONE Qdrant instance ----
+  qdrant:
+    image: qdrant/qdrant:v1.14.0
+    container_name: clara-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - clara-net
+    restart: unless-stopped
+
+networks:
+  clara-net:
+    driver: bridge
+  bn-shared:
+    # Connect to the existing BN-2.0-API network where Qdrant runs
+    external: true
+    name: bn-20-api-main_default
+
+volumes:
+  qdrant_data:
+    driver: local

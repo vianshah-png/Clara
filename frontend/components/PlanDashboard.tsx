@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { WeeklyPlan, DailyPlan, Recipe, UserProfile } from '../types';
+import { WeeklyPlan, DailyPlan, Recipe, UserProfile, MealOption } from '../types';
 import { MealCard } from './MealCard';
-import { ShoppingListModal } from './ShoppingListModal';
 import { CookingModeOverlay } from './CookingModeOverlay';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { getMealSwapOptions, generateSpeechFromBackend as generateSpeech, decodeAudioData } from '../services/apiClient';
+import {
+  getMealSwapOptions,
+  generateSpeechFromBackend as generateSpeech,
+  decodeAudioData,
+  getQuickFillers,
+  QuickFiller,
+} from '../services/apiClient';
 
 interface PlanDashboardProps {
   plan: WeeklyPlan;
@@ -24,6 +29,9 @@ interface ActiveSwapState {
   options: Recipe[] | null;
 }
 
+type MealType = 'breakfast' | 'lunch' | 'snack' | 'dinner';
+type OptionMealType = 'breakfast' | 'lunch' | 'dinner';
+
 export const PlanDashboard: React.FC<PlanDashboardProps> = ({
   plan,
   onReset,
@@ -39,11 +47,14 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
   // State to manage the active swap session
   const [activeSwap, setActiveSwap] = useState<ActiveSwapState | null>(null);
 
-  // State for shopping list modal
-  const [showShoppingList, setShowShoppingList] = useState(false);
-
   // State for cooking mode
   const [activeCookingRecipe, setActiveCookingRecipe] = useState<Recipe | null>(null);
+
+  const [confirmedOptions, setConfirmedOptions] = useState<Record<string, number>>({});
+  const [previewOptions, setPreviewOptions] = useState<Record<string, number>>({});
+  const [likedRecipes, setLikedRecipes] = useState<Set<string>>(new Set());
+  const [quickFillers, setQuickFillers] = useState<QuickFiller[]>([]);
+  const [isFillersLoading, setIsFillersLoading] = useState(false);
 
   // Audio State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -119,14 +130,64 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
     }
   }, [plan.length, selectedDayIndex]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadFillers = async () => {
+      if (!userProfile) return;
+      setIsFillersLoading(true);
+      try {
+        const fillers = await getQuickFillers(userProfile, 8);
+        if (isMounted) setQuickFillers(fillers);
+      } catch (error) {
+        console.warn("Failed to load quick fillers", error);
+        if (isMounted) setQuickFillers([]);
+      } finally {
+        if (isMounted) setIsFillersLoading(false);
+      }
+    };
+
+    loadFillers();
+    return () => {
+      isMounted = false;
+    };
+  }, [userProfile]);
+
   const currentDay: DailyPlan | undefined = plan[selectedDayIndex];
 
   // Check if current view is locked
   const isDayLocked = selectedDayIndex >= unlockedDaysCount;
 
+  const getMealKey = (dayIndex: number, mealType: MealType) => `${dayIndex}:${mealType}`;
+
+  const getRecipeKey = (recipe: Recipe) => recipe.url || recipe.name;
+
+  const getOptionIndex = (mealType: MealType) => {
+    const key = getMealKey(selectedDayIndex, mealType);
+    return previewOptions[key] ?? confirmedOptions[key] ?? 0;
+  };
+
+  const getSelectedRecipes = (
+    meal: Recipe | Recipe[] | MealOption[] | undefined,
+    mealType: MealType
+  ): Recipe[] => {
+    if (!meal) return [];
+
+    if (Array.isArray(meal) && meal.length > 0 && 'optionLabel' in meal[0]) {
+      const optionIndex = getOptionIndex(mealType);
+      return (meal as MealOption[])[optionIndex ?? 0]?.items || [];
+    }
+
+    return Array.isArray(meal) ? meal as Recipe[] : [meal as Recipe];
+  };
+
+  const confirmedMealCount = (['breakfast', 'lunch', 'dinner'] as OptionMealType[])
+    .filter(type => confirmedOptions[getMealKey(selectedDayIndex, type)] !== undefined).length;
+
   // Helper to sum macros for combos
-  const sumMeal = (meal: Recipe | Recipe[]) => {
-    const list = Array.isArray(meal) ? meal : [meal];
+  const sumMeal = (meal: Recipe | Recipe[] | MealOption[] | undefined, mealType: MealType) => {
+    const list = getSelectedRecipes(meal, mealType);
+
     return {
       cals: list.reduce((s, r) => s + (r.calories || 0), 0),
       pro: list.reduce((s, r) => s + (r.protein || 0), 0),
@@ -135,15 +196,43 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
     };
   };
 
-  const b = currentDay ? sumMeal(currentDay.breakfast) : { cals: 0, pro: 0, crb: 0, fat: 0 };
-  const l = currentDay ? sumMeal(currentDay.lunch) : { cals: 0, pro: 0, crb: 0, fat: 0 };
-  const s = currentDay ? sumMeal(currentDay.snack) : { cals: 0, pro: 0, crb: 0, fat: 0 };
-  const d = currentDay ? sumMeal(currentDay.dinner) : { cals: 0, pro: 0, crb: 0, fat: 0 };
+  const b = currentDay ? sumMeal(currentDay.breakfast, 'breakfast') : { cals: 0, pro: 0, crb: 0, fat: 0 };
+  const l = currentDay ? sumMeal(currentDay.lunch, 'lunch') : { cals: 0, pro: 0, crb: 0, fat: 0 };
+  const s = currentDay ? sumMeal(currentDay.snack, 'snack') : { cals: 0, pro: 0, crb: 0, fat: 0 };
+  const d = currentDay ? sumMeal(currentDay.dinner, 'dinner') : { cals: 0, pro: 0, crb: 0, fat: 0 };
 
   const totalCalories = b.cals + l.cals + s.cals + d.cals;
   const totalProtein = b.pro + l.pro + s.pro + d.pro;
   const totalCarbs = b.crb + l.crb + s.crb + d.crb;
   const totalFats = b.fat + l.fat + s.fat + d.fat;
+
+  const handleConfirmMealOption = (mealType: OptionMealType, optionIndex: number) => {
+    setPreviewOptions(prev => ({
+      ...prev,
+      [getMealKey(selectedDayIndex, mealType)]: optionIndex,
+    }));
+    setConfirmedOptions(prev => ({
+      ...prev,
+      [getMealKey(selectedDayIndex, mealType)]: optionIndex,
+    }));
+  };
+
+  const handlePreviewMealOption = (mealType: OptionMealType, optionIndex: number) => {
+    setPreviewOptions(prev => ({
+      ...prev,
+      [getMealKey(selectedDayIndex, mealType)]: optionIndex,
+    }));
+  };
+
+  const handleToggleLike = (recipe: Recipe) => {
+    const key = getRecipeKey(recipe);
+    setLikedRecipes(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   // 1. User Clicks Swap Icon -> Fetch 5 Options
   const handleInitiateSwap = async (mealType: 'breakfast' | 'lunch' | 'snack' | 'dinner') => {
@@ -159,9 +248,11 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
 
     try {
       const meal = currentDay[mealType];
-      // For swaps, if it's a combo, we swap the first item or the whole thing? 
-      // Usually, swap logic works best on a single representative recipe.
-      const representative = Array.isArray(meal) ? meal[0] : meal;
+      const representative = getSelectedRecipes(meal, mealType)[0];
+      if (!representative) {
+        setActiveSwap(null);
+        return;
+      }
       const options = await getMealSwapOptions(representative, userProfile);
 
       // Update state with options
@@ -181,7 +272,18 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
     const { dayIndex, mealType } = activeSwap;
     if (plan[dayIndex]) {
       // Swapping a combo replaces it with a single new choice for now
-      plan[dayIndex][mealType] = [newRecipe];
+      const mutableDay = plan[dayIndex] as unknown as Record<MealType, Recipe | Recipe[] | MealOption[]>;
+      mutableDay[mealType] = [newRecipe];
+      setConfirmedOptions(prev => {
+        const next = { ...prev };
+        delete next[getMealKey(dayIndex, mealType)];
+        return next;
+      });
+      setPreviewOptions(prev => {
+        const next = { ...prev };
+        delete next[getMealKey(dayIndex, mealType)];
+        return next;
+      });
     }
     setActiveSwap(null);
   };
@@ -197,7 +299,7 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
   };
 
   // Helper to check if a specific card is in a specific state
-  const getCardState = (type: 'breakfast' | 'lunch' | 'snack' | 'dinner') => {
+  const getCardState = (type: MealType) => {
     const isActive = activeSwap?.dayIndex === selectedDayIndex && activeSwap?.mealType === type;
     return {
       isSwapping: isActive && activeSwap?.isLoading,
@@ -205,7 +307,9 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
       onSwapStart: () => handleInitiateSwap(type),
       onSwapConfirm: handleConfirmSwap,
       onSwapCancel: handleCancelSwap,
-      onStartCooking: handleStartCooking
+      onStartCooking: handleStartCooking,
+      onToggleLike: handleToggleLike,
+      isRecipeLiked: (recipe: Recipe) => likedRecipes.has(getRecipeKey(recipe)),
     };
   };
 
@@ -352,15 +456,23 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
             <div className="grid md:grid-cols-2 gap-4 animate-in slide-in-from-bottom-4 duration-500">
               <MealCard
                 title="Breakfast"
-                recipe={currentDay.breakfast}
+                options={currentDay.breakfast}
                 colorClass="bg-amber-50 text-amber-900 border-amber-200"
+                selectedOptionIndex={getOptionIndex('breakfast')}
+                confirmedOptionIndex={confirmedOptions[getMealKey(selectedDayIndex, 'breakfast')]}
+                onPreviewOptionChange={(index) => handlePreviewMealOption('breakfast', index)}
+                onConfirmOption={(index) => handleConfirmMealOption('breakfast', index)}
                 {...getCardState('breakfast')}
                 onStartCooking={handleStartCooking}
               />
               <MealCard
                 title="Lunch"
-                recipe={currentDay.lunch}
+                options={currentDay.lunch}
                 colorClass="bg-emerald-50 text-emerald-900 border-emerald-200"
+                selectedOptionIndex={getOptionIndex('lunch')}
+                confirmedOptionIndex={confirmedOptions[getMealKey(selectedDayIndex, 'lunch')]}
+                onPreviewOptionChange={(index) => handlePreviewMealOption('lunch', index)}
+                onConfirmOption={(index) => handleConfirmMealOption('lunch', index)}
                 {...getCardState('lunch')}
                 onStartCooking={handleStartCooking}
               />
@@ -373,8 +485,12 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
               />
               <MealCard
                 title="Dinner"
-                recipe={currentDay.dinner}
+                options={currentDay.dinner}
                 colorClass="bg-sky-50 text-sky-900 border-sky-200"
+                selectedOptionIndex={getOptionIndex('dinner')}
+                confirmedOptionIndex={confirmedOptions[getMealKey(selectedDayIndex, 'dinner')]}
+                onPreviewOptionChange={(index) => handlePreviewMealOption('dinner', index)}
+                onConfirmOption={(index) => handleConfirmMealOption('dinner', index)}
                 {...getCardState('dinner')}
                 onStartCooking={handleStartCooking}
               />
@@ -384,8 +500,53 @@ export const PlanDashboard: React.FC<PlanDashboardProps> = ({
           {/* Sidebar: Stats */}
           <div className="space-y-6 animate-in slide-in-from-right-4 duration-500 delay-100">
             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">Quick Fillers</h3>
+                  <p className="text-xs text-slate-400 uppercase tracking-wide mt-1">BN Shop snacks filtered for you</p>
+                </div>
+                {isFillersLoading && (
+                  <div className="w-5 h-5 border-2 border-brand-100 border-t-brand-600 rounded-full animate-spin"></div>
+                )}
+              </div>
+
+              <div className="space-y-3 max-h-80 overflow-y-auto no-scrollbar">
+                {!isFillersLoading && quickFillers.length === 0 && (
+                  <p className="text-sm text-slate-400 bg-slate-50 rounded-xl p-4">No snack fillers found after applying your exclusions.</p>
+                )}
+                {quickFillers.map((item) => (
+                  <a
+                    key={item.id}
+                    href={item.shopUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex gap-3 p-3 rounded-2xl border border-slate-100 hover:border-brand-200 hover:bg-brand-50/40 transition-all group"
+                  >
+                    <div className="w-12 h-12 bg-slate-50 rounded-xl overflow-hidden flex-shrink-0 border border-slate-100">
+                      {item.image ? (
+                        <img src={item.image} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[10px] font-black text-slate-300">BN</div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-xs font-black text-slate-800 leading-snug line-clamp-2">{item.name}</h4>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 truncate">{item.category}</span>
+                        {item.price && <span className="text-[10px] font-black text-emerald-600">Rs.{item.price}</span>}
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
               <h3 className="text-lg font-bold text-slate-800 mb-2">Daily Nutrition</h3>
-              <p className="text-xs text-slate-400 mb-6 uppercase tracking-wide">Based on Standard Servings</p>
+              <p className="text-xs text-slate-400 mb-2 uppercase tracking-wide">Selected meal options</p>
+              <p className="text-xs text-slate-500 mb-6">
+                Macros update as you browse options. {confirmedMealCount}/3 main meals confirmed.
+              </p>
 
               <div className="relative h-64 w-full flex items-center justify-center">
                 <ResponsiveContainer width="100%" height="100%">

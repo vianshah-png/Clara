@@ -3,6 +3,13 @@ export type Goal = 'Weight Loss' | 'Weight Gain' | 'Maintenance';
 export type DietType = 'Vegetarian' | 'Non-Vegetarian' | 'Eggetarian' | 'Vegan' | 'Jain';
 export type ActivityLevel = 'Sedentary' | 'Lightly Active' | 'Moderately Active' | 'Very Active';
 
+export interface FoodRecall {
+  breakfast: string[];
+  lunch: string[];
+  snack: string[];
+  dinner: string[];
+}
+
 export interface UserProfile {
   age: string;
   weight: string;
@@ -15,6 +22,7 @@ export interface UserProfile {
   cuisine: string;
   allergies: string;
   user_id?: string;
+  foodRecall?: FoodRecall;
 }
 
 export interface Macro {
@@ -53,12 +61,17 @@ export interface Recipe {
   health_tags?: string[];
 }
 
+export interface MealOption {
+  optionLabel: string;
+  items: Recipe[];
+}
+
 export interface DailyPlan {
   day: string;
-  breakfast: Recipe | Recipe[];
-  lunch: Recipe | Recipe[];
+  breakfast: MealOption[];
+  lunch: MealOption[];
   snack: Recipe | Recipe[];
-  dinner: Recipe | Recipe[];
+  dinner: MealOption[];
   summary: string;
 }
 

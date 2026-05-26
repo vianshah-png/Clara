@@ -39,4 +39,4 @@ EXPOSE 8080
 
 # RUN BOTH: Next.js handles the main port ($PORT) and proxies /api to backend (3001)
 # Use shell form so $PORT is evaluated at runtime (Cloud Run sets this env var)
-CMD concurrently "PORT=3001 node backend/server.js" "PORT=${PORT:-8080} HOSTNAME=0.0.0.0 node frontend/server.js"
+CMD concurrently "PORT=3003 node backend/server.js" "PORT=${PORT:-8080} HOSTNAME=0.0.0.0 node frontend/server.js"

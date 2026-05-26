@@ -8,7 +8,11 @@ interface ShoppingListModalProps {
 
 export const ShoppingListModal: React.FC<ShoppingListModalProps> = ({ plan, onClose }) => {
   // Simple extraction of distinct meals for a shopping list concept
-  const allRecipes = plan.flatMap(day => [day.breakfast, day.lunch, day.snack, day.dinner].flat());
+  const allRecipes = plan.flatMap(day => {
+    const optionRecipes = [...day.breakfast, ...day.lunch, ...day.dinner].flatMap(option => option.items);
+    const snackRecipes = Array.isArray(day.snack) ? day.snack : [day.snack];
+    return [...optionRecipes, ...snackRecipes];
+  });
   const uniqueNames = Array.from(new Set(allRecipes.map(r => r.name)));
 
   return (
@@ -24,7 +28,7 @@ export const ShoppingListModal: React.FC<ShoppingListModalProps> = ({ plan, onCl
         <div className="flex-grow overflow-y-auto p-6 space-y-4">
            <div className="bg-brand-50 rounded-2xl p-4 text-brand-700 text-sm">
              <span className="font-bold mr-2 uppercase tracking-tight text-xs">Note:</span>
-             This list includes the main dishes for your 7-day plan. You can view individual recipe details for specific ingredients.
+             This list includes the main dishes for your 3-day plan. You can view individual recipe details for specific ingredients.
            </div>
 
            <div className="grid gap-3">
